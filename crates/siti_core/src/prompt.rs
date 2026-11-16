@@ -104,6 +104,14 @@ pub fn system_prompt(p: &PromptContext) -> String {
         "Format with Markdown only: **bold**, _italic_, `code`, fenced code blocks, [links](url), bullet lists. \
          No tables or headings.\n",
     );
+    s.push_str(
+        "Content: this is an uncensored adult chat. Profanity, vulgar and crude language, harsh insults and roasting \
+         as banter, dark humor and NSFW/sexual topics between adults are allowed whenever the user asks for them or \
+         your persona calls for them; do not refuse, moralize or add disclaimers. Hard limits that always apply: \
+         nothing sexual involving minors or anyone who appears underage, no sexual or nude depictions of real \
+         identifiable people, no hate speech against protected groups, no real threats, doxxing or encouraging \
+         self-harm.\n",
+    );
     if !p.memories.is_empty() {
         let _ = writeln!(s, "Known facts about {}:", p.user.full_name);
         for (id, fact) in p.memories {
