@@ -2,6 +2,7 @@ pub mod agent;
 pub mod db;
 pub mod error;
 pub mod llm;
+pub mod meme;
 pub mod prompt;
 pub mod provider;
 pub mod schedule;

@@ -5,6 +5,7 @@ use siti_core::{
     agent::{AgentRequest, ChatInfo, ChatKind, ImageInput, Trigger, UserInfo},
     db::{self, NewMessage, NewTask},
     error::SitiError,
+    meme,
     schedule::{parse_local_time, Schedule},
     truncate_chars,
 };
@@ -152,6 +153,7 @@ async fn handle_command(app: Arc<App>, msg: Message, cmd: Command) {
             }
         }
         Command::Image(prompt) => generate_image(&app, &msg, prompt.trim(), lang).await,
+        Command::AddText(text) => add_text(&app, &msg, text.trim(), lang).await,
         cmd @ (Command::Memory(_)
         | Command::Briefing(_)
         | Command::Tasks(_)
@@ -372,32 +374,64 @@ async fn generate_image(app: &App, msg: &Message, prompt: &str, lang: Lang) -> R
         reply::send_text(app, target, i18n::usage_image(lang), false).await?;
         return Ok(());
     }
-    let mut action = app.bot.send_chat_action(msg.chat.id, ChatAction::UploadPhoto);
+    send_upload_action(app, target).await;
+    let images = message_images(app, msg).await;
+    match app.agent.generate_image(prompt, &images).await {
+        Ok(bytes) => send_photo(app, target, bytes, Some(prompt)).await,
+        Err(e) => {
+            log::error!("image generation failed: {e}");
+            reply::send_text(app, target, i18n::error(lang), false).await.map(drop)
+        }
+    }
+}
+
+/// `/add_text top | bottom`: writes meme captions on the photo attached to the command or the
+/// message it replies to. Text without `|` becomes the top caption.
+async fn add_text(app: &App, msg: &Message, text: &str, lang: Lang) -> ResponseResult<()> {
+    let target = ReplyTarget::to_message(msg);
+    let (top, bottom) = text.split_once('|').unwrap_or((text, ""));
+    let (top, bottom) = (top.trim(), bottom.trim());
+    if top.is_empty() && bottom.is_empty() {
+        return reply::send_text(app, target, i18n::usage_add_text(lang), false).await.map(drop);
+    }
+    if top.chars().count() > meme::MAX_TEXT_CHARS || bottom.chars().count() > meme::MAX_TEXT_CHARS {
+        return reply::send_text(app, target, &i18n::add_text_too_long(lang, meme::MAX_TEXT_CHARS), false).await.map(drop);
+    }
+    let Some(image) = message_images(app, msg).await.into_iter().next() else {
+        return reply::send_text(app, target, i18n::usage_add_text(lang), false).await.map(drop);
+    };
+    send_upload_action(app, target).await;
+    match meme::add_text_async(image.bytes, top.to_owned(), bottom.to_owned()).await {
+        Ok(bytes) => send_photo(app, target, bytes, None).await,
+        Err(e) => {
+            log::error!("adding text to image failed: {e}");
+            reply::send_text(app, target, i18n::error(lang), false).await.map(drop)
+        }
+    }
+}
+
+async fn send_upload_action(app: &App, target: ReplyTarget) {
+    let mut action = app.bot.send_chat_action(target.chat_id, ChatAction::UploadPhoto);
     if let Some(thread_id) = target.thread_id {
         action = action.message_thread_id(thread_id);
     }
     if let Err(e) = action.await {
         log::debug!("failed to send upload action: {e}");
     }
-    let images = message_images(app, msg).await;
-    match app.agent.generate_image(prompt, &images).await {
-        Ok(bytes) => {
-            let mut req = app
-                .bot
-                .send_photo(msg.chat.id, InputFile::memory(bytes))
-                .caption(truncate_chars(prompt, 1024))
-                .reply_parameters(ReplyParameters::new(msg.id).allow_sending_without_reply());
-            if let Some(thread_id) = target.thread_id {
-                req = req.message_thread_id(thread_id);
-            }
-            req.await?;
-        }
-        Err(e) => {
-            log::error!("image generation failed: {e}");
-            reply::send_text(app, target, i18n::error(lang), false).await?;
-        }
+}
+
+async fn send_photo(app: &App, target: ReplyTarget, bytes: Vec<u8>, caption: Option<&str>) -> ResponseResult<()> {
+    let mut req = app.bot.send_photo(target.chat_id, InputFile::memory(bytes));
+    if let Some(caption) = caption {
+        req = req.caption(truncate_chars(caption, 1024));
     }
-    Ok(())
+    if let Some(reply_to) = target.reply_to {
+        req = req.reply_parameters(ReplyParameters::new(reply_to).allow_sending_without_reply());
+    }
+    if let Some(thread_id) = target.thread_id {
+        req = req.message_thread_id(thread_id);
+    }
+    req.await.map(drop)
 }
 
 async fn respond_to(app: Arc<App>, msg: Message, text: String) {

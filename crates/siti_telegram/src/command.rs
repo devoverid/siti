@@ -11,6 +11,14 @@ pub enum Command {
     Ask(String),
     #[command(description = "Buat gambar / Generate an image")]
     Image(String),
+    /// Telegram only registers `[a-z0-9_]` names, so `add_text` is listed and `add-text` parses too.
+    #[command(
+        rename = "add_text",
+        aliases = ["add-text", "addtext"],
+        hide_aliases,
+        description = "Buat meme dari foto / Make a meme from a photo: /add_text atas | bawah (top | bottom)"
+    )]
+    AddText(String),
     #[command(description = "Ingatan saya tentangmu / What I remember about you: /memory [clear | forget <id>]")]
     Memory(String),
     #[command(description = "Ringkas obrolan / Summarize the chat: /summary [jam/hours, default 24]")]

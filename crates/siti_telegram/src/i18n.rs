@@ -40,6 +40,8 @@ pub fn tool_status(lang: Lang, name: &str) -> &'static str {
         ("read_chat_history", Lang::En) => "💬 Reading the chat…",
         ("generate_image", Lang::Id) => "🖼️ Membuat gambar…",
         ("generate_image", Lang::En) => "🖼️ Creating the image…",
+        ("add_text_to_image", Lang::Id) => "✍️ Menulis teks di gambar…",
+        ("add_text_to_image", Lang::En) => "✍️ Writing text on the image…",
         (_, Lang::Id) => "⚙️ Sedang bekerja…",
         (_, Lang::En) => "⚙️ Working…",
     }
@@ -54,11 +56,12 @@ macro_rules! help_id {
             "• Di grup: mention saya, balas pesan saya, atau awali pesan dengan \"Siti,\"\n",
             "• Mengingat isi obrolan grup dan fakta tentang kamu (cukup bilang \"ingat bahwa …\")\n",
             "• Mencari di web dan membaca halaman web\n",
-            "• Membuat gambar\n",
+            "• Membuat gambar dan meme dari fotomu\n",
             "• Pengingat dan tugas terjadwal (mis. \"ingatkan aku 10 menit lagi untuk minum\")\n\n",
             "Perintah:\n",
             "/ask <pertanyaan> — tanya apa saja\n",
             "/image <deskripsi> — buat gambar\n",
+            "/add_text atas | bawah — buat meme dari foto (kirim sebagai caption foto atau balas sebuah foto)\n",
             "/memory — lihat atau hapus hal yang saya ingat tentangmu\n",
             "/summary [jam] — ringkas obrolan (default 24 jam)\n",
             "/briefing HH:MM | off — briefing harian\n",
@@ -79,11 +82,12 @@ macro_rules! help_en {
             "• In groups: mention me, reply to my message, or start a message with \"Siti,\"\n",
             "• Remember the group conversation and facts about you (just say \"remember that …\")\n",
             "• Search the web and read web pages\n",
-            "• Generate images\n",
+            "• Generate images and make memes from your photos\n",
             "• Reminders and scheduled tasks (e.g. \"remind me in 10 minutes to drink water\")\n\n",
             "Commands:\n",
             "/ask <question> — ask anything\n",
             "/image <description> — generate an image\n",
+            "/add_text top | bottom — make a meme from a photo (send as a photo caption or reply to a photo)\n",
             "/memory — see or delete what I remember about you\n",
             "/summary [hours] — summarize the chat (default 24 hours)\n",
             "/briefing HH:MM | off — daily briefing\n",
@@ -119,6 +123,20 @@ pub fn usage_image(lang: Lang) -> &'static str {
     match lang {
         Lang::Id => "Cara pakai: /image <deskripsi gambar>\nUntuk mengedit, kirim /image sebagai caption foto atau balas sebuah foto.",
         Lang::En => "Usage: /image <image description>\nTo edit, send /image as a photo caption or reply to a photo.",
+    }
+}
+
+pub fn usage_add_text(lang: Lang) -> &'static str {
+    match lang {
+        Lang::Id => "Cara pakai: /add_text teks atas | teks bawah\nKirim sebagai caption foto atau balas sebuah foto. Tanpa \"|\", teks ditulis di atas.",
+        Lang::En => "Usage: /add_text top text | bottom text\nSend it as a photo caption or reply to a photo. Without \"|\", the text goes on top.",
+    }
+}
+
+pub fn add_text_too_long(lang: Lang, max: usize) -> String {
+    match lang {
+        Lang::Id => format!("Teksnya terlalu panjang (maks. {max} karakter per bagian)."),
+        Lang::En => format!("The text is too long (max {max} characters per part)."),
     }
 }
 

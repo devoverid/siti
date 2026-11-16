@@ -1,5 +1,6 @@
 //! Built-in tools the agent can call. Every tool module exposes `NAME`, `definition()` and `run()`.
 
+pub mod add_text_to_image;
 pub mod forget;
 pub mod generate_image;
 pub mod read_chat_history;
@@ -64,7 +65,7 @@ impl Tools {
             cancel_scheduled_task::NAME,
         ];
         if matches!(trigger, Trigger::UserMessage { .. }) {
-            names.extend([create_reminder::NAME, schedule_agent_task::NAME]);
+            names.extend([create_reminder::NAME, schedule_agent_task::NAME, add_text_to_image::NAME]);
         }
         if self.search.is_some() {
             names.extend([web_search::NAME, read_webpage::NAME]);
@@ -106,6 +107,7 @@ impl Tools {
             (schedule_agent_task::NAME, _) => schedule_agent_task::run(args, ctx).await,
             (list_scheduled_tasks::NAME, _) => list_scheduled_tasks::run(args, ctx).await,
             (cancel_scheduled_task::NAME, _) => cancel_scheduled_task::run(args, ctx).await,
+            (add_text_to_image::NAME, _) => add_text_to_image::run(args, ctx).await,
             (web_search::NAME, Some(client)) => web_search::run(args, client).await,
             (read_webpage::NAME, Some(client)) => read_webpage::run(args, client).await,
             (generate_image::NAME, _) => match &self.image {
@@ -129,6 +131,7 @@ fn definition(name: &str) -> Option<ChatCompletionTools> {
         cancel_scheduled_task::NAME => cancel_scheduled_task::definition(),
         web_search::NAME => web_search::definition(),
         read_webpage::NAME => read_webpage::definition(),
+        add_text_to_image::NAME => add_text_to_image::definition(),
         generate_image::NAME => generate_image::definition(),
         _ => return None,
     })
