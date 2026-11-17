@@ -14,6 +14,8 @@ pub enum SitiError {
     Base64DecodeError,
     #[error("generation error: {0}")]
     Generate(String),
+    #[error("unsupported input: {0}")]
+    Unsupported(String),
     #[error("configuration error: {0}")]
     Config(String),
 }

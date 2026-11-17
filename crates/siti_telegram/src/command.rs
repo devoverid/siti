@@ -16,7 +16,7 @@ pub enum Command {
         rename = "add_text",
         aliases = ["add-text", "addtext"],
         hide_aliases,
-        description = "Buat meme dari foto / Make a meme from a photo: /add_text atas | bawah (top | bottom)"
+        description = "Buat meme dari foto/GIF / Make a meme from a photo/GIF: /add_text atas | bawah (top | bottom)"
     )]
     AddText(String),
     #[command(description = "Ingatan saya tentangmu / What I remember about you: /memory [clear | forget <id>]")]

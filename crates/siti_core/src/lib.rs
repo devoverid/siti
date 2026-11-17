@@ -1,4 +1,5 @@
 pub mod agent;
+pub mod animation;
 pub mod db;
 pub mod error;
 pub mod llm;
