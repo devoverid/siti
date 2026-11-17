@@ -25,6 +25,9 @@ use crate::{
     reply::{self, ReplyTarget},
 };
 
+/// Animation captioning is CPU-heavy; at most this many run at once, the rest wait in line.
+static ANIMATION_JOBS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(2);
+
 /// Entry point for every message update. Every message is stored first (for chat context);
 /// long work is spawned so that teloxide's per-chat sequential dispatch keeps ingesting updates
 /// while the agent runs.
@@ -423,6 +426,7 @@ async fn add_text(app: &App, msg: &Message, text: &str, lang: Lang) -> ResponseR
                 return reply::send_text(app, target, &msg, false).await.map(drop);
             }
             send_upload_action(app, target, ChatAction::UploadVideo).await;
+            let _permit = ANIMATION_JOBS.acquire().await.expect("semaphore is never closed");
             let bytes = match download(app, file).await {
                 Ok(bytes) => bytes,
                 Err(e) => {

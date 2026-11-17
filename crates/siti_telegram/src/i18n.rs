@@ -149,8 +149,8 @@ pub fn add_text_animation_too_big(lang: Lang, max_mb: u32) -> String {
 
 pub fn add_text_animation_unsupported(lang: Lang) -> &'static str {
     match lang {
-        Lang::Id => "GIF ini tidak bisa diproses (maks. 600 frame dan 1280 px per sisi).",
-        Lang::En => "This GIF can't be processed (max 600 frames and 1280 px per side).",
+        Lang::Id => "GIF ini tidak bisa diproses (maks. 600 frame dan 1280 px per sisi, dan harus selesai dalam 1 menit).",
+        Lang::En => "This GIF can't be processed (max 600 frames and 1280 px per side, and it must finish within 1 minute).",
     }
 }
 
