@@ -3,6 +3,7 @@ use std::sync::Arc;
 use chrono::Utc;
 use siti_core::{
     agent::{AgentRequest, ChatInfo, ChatKind, ImageInput, Trigger, UserInfo},
+    animation::{self, AnimationFormat},
     db::{self, NewMessage, NewTask},
     error::SitiError,
     meme,
@@ -11,9 +12,9 @@ use siti_core::{
 };
 use teloxide::{
     net::Download,
-    payloads::{SendChatActionSetters, SendPhotoSetters},
+    payloads::{SendAnimationSetters, SendChatActionSetters, SendPhotoSetters},
     prelude::*,
-    types::{ChatAction, InputFile, MessageEntityKind, PhotoSize, ReplyParameters, User},
+    types::{ChatAction, FileMeta, InputFile, MessageEntityKind, PhotoSize, ReplyParameters, User},
     utils::command::BotCommands,
 };
 
@@ -374,7 +375,7 @@ async fn generate_image(app: &App, msg: &Message, prompt: &str, lang: Lang) -> R
         reply::send_text(app, target, i18n::usage_image(lang), false).await?;
         return Ok(());
     }
-    send_upload_action(app, target).await;
+    send_upload_action(app, target, ChatAction::UploadPhoto).await;
     let images = message_images(app, msg).await;
     match app.agent.generate_image(prompt, &images).await {
         Ok(bytes) => send_photo(app, target, bytes, Some(prompt)).await,
@@ -385,8 +386,8 @@ async fn generate_image(app: &App, msg: &Message, prompt: &str, lang: Lang) -> R
     }
 }
 
-/// `/add_text top | bottom`: writes meme captions on the photo attached to the command or the
-/// message it replies to. Text without `|` becomes the top caption.
+/// `/add_text top | bottom`: writes meme captions on the photo or GIF attached to the command or
+/// the message it replies to. Text without `|` becomes the top caption.
 async fn add_text(app: &App, msg: &Message, text: &str, lang: Lang) -> ResponseResult<()> {
     let target = ReplyTarget::to_message(msg);
     let (top, bottom) = text.split_once('|').unwrap_or((text, ""));
@@ -397,27 +398,102 @@ async fn add_text(app: &App, msg: &Message, text: &str, lang: Lang) -> ResponseR
     if top.chars().count() > meme::MAX_TEXT_CHARS || bottom.chars().count() > meme::MAX_TEXT_CHARS {
         return reply::send_text(app, target, &i18n::add_text_too_long(lang, meme::MAX_TEXT_CHARS), false).await.map(drop);
     }
-    let Some(image) = message_images(app, msg).await.into_iter().next() else {
-        return reply::send_text(app, target, i18n::usage_add_text(lang), false).await.map(drop);
-    };
-    send_upload_action(app, target).await;
-    match meme::add_text_async(image.bytes, top.to_owned(), bottom.to_owned()).await {
-        Ok(bytes) => send_photo(app, target, bytes, None).await,
-        Err(e) => {
-            log::error!("adding text to image failed: {e}");
-            reply::send_text(app, target, i18n::error(lang), false).await.map(drop)
+    match caption_media(msg) {
+        None => reply::send_text(app, target, i18n::usage_add_text(lang), false).await.map(drop),
+        Some(CaptionMedia::Photo(photo)) => {
+            send_upload_action(app, target, ChatAction::UploadPhoto).await;
+            let bytes = match download(app, &photo.file).await {
+                Ok(bytes) => bytes,
+                Err(e) => {
+                    log::warn!("failed to download photo: {e}");
+                    return reply::send_text(app, target, i18n::error(lang), false).await.map(drop);
+                }
+            };
+            match meme::add_text_async(bytes, top.to_owned(), bottom.to_owned()).await {
+                Ok(bytes) => send_photo(app, target, bytes, None).await,
+                Err(e) => {
+                    log::error!("adding text to image failed: {e}");
+                    reply::send_text(app, target, i18n::error(lang), false).await.map(drop)
+                }
+            }
+        }
+        Some(CaptionMedia::Animation(file, format)) => {
+            if file.size > animation::MAX_INPUT_BYTES {
+                let msg = i18n::add_text_animation_too_big(lang, animation::MAX_INPUT_BYTES / (1024 * 1024));
+                return reply::send_text(app, target, &msg, false).await.map(drop);
+            }
+            send_upload_action(app, target, ChatAction::UploadVideo).await;
+            let bytes = match download(app, file).await {
+                Ok(bytes) => bytes,
+                Err(e) => {
+                    log::warn!("failed to download animation: {e}");
+                    return reply::send_text(app, target, i18n::error(lang), false).await.map(drop);
+                }
+            };
+            match animation::add_text_async(bytes, format, top.to_owned(), bottom.to_owned()).await {
+                Ok(mp4) => send_animation(app, target, mp4).await,
+                Err(SitiError::Unsupported(e)) => {
+                    log::info!("animation rejected: {e}");
+                    reply::send_text(app, target, i18n::add_text_animation_unsupported(lang), false).await.map(drop)
+                }
+                Err(e) => {
+                    log::error!("adding text to animation failed: {e}");
+                    reply::send_text(app, target, i18n::error(lang), false).await.map(drop)
+                }
+            }
         }
     }
 }
 
-async fn send_upload_action(app: &App, target: ReplyTarget) {
-    let mut action = app.bot.send_chat_action(target.chat_id, ChatAction::UploadPhoto);
+enum CaptionMedia<'a> {
+    Photo(&'a PhotoSize),
+    Animation(&'a FileMeta, AnimationFormat),
+}
+
+/// First photo or animation on `msg`, then on the message it replies to (same order as `message_images`).
+fn caption_media(msg: &Message) -> Option<CaptionMedia<'_>> {
+    for source in [Some(msg), msg.reply_to_message()].into_iter().flatten() {
+        if let Some(photo) = largest_photo(source) {
+            return Some(CaptionMedia::Photo(photo));
+        }
+        if let Some(a) = source.animation() {
+            let format = if a.mime_type.as_ref().is_some_and(|m| m.essence_str() == "image/gif") {
+                AnimationFormat::Gif
+            } else {
+                AnimationFormat::Mp4
+            };
+            return Some(CaptionMedia::Animation(&a.file, format));
+        }
+        if let Some(d) = source.document() {
+            match d.mime_type.as_ref().map(|m| m.essence_str()) {
+                Some("image/gif") => return Some(CaptionMedia::Animation(&d.file, AnimationFormat::Gif)),
+                Some("video/mp4") => return Some(CaptionMedia::Animation(&d.file, AnimationFormat::Mp4)),
+                _ => {}
+            }
+        }
+    }
+    None
+}
+
+async fn send_upload_action(app: &App, target: ReplyTarget, action: ChatAction) {
+    let mut action = app.bot.send_chat_action(target.chat_id, action);
     if let Some(thread_id) = target.thread_id {
         action = action.message_thread_id(thread_id);
     }
     if let Err(e) = action.await {
         log::debug!("failed to send upload action: {e}");
     }
+}
+
+async fn send_animation(app: &App, target: ReplyTarget, mp4: Vec<u8>) -> ResponseResult<()> {
+    let mut req = app.bot.send_animation(target.chat_id, InputFile::memory(mp4).file_name("meme.mp4"));
+    if let Some(reply_to) = target.reply_to {
+        req = req.reply_parameters(ReplyParameters::new(reply_to).allow_sending_without_reply());
+    }
+    if let Some(thread_id) = target.thread_id {
+        req = req.message_thread_id(thread_id);
+    }
+    req.await.map(drop)
 }
 
 async fn send_photo(app: &App, target: ReplyTarget, bytes: Vec<u8>, caption: Option<&str>) -> ResponseResult<()> {
@@ -486,7 +562,7 @@ async fn message_images(app: &App, msg: &Message) -> Vec<ImageInput> {
     let mut images = Vec::new();
     for source in [Some(msg), msg.reply_to_message()].into_iter().flatten() {
         let Some(photo) = largest_photo(source) else { continue };
-        match download(app, photo).await {
+        match download(app, &photo.file).await {
             Ok(bytes) => images.push(ImageInput { mime: "image/jpeg".into(), bytes }),
             Err(e) => log::warn!("failed to download photo: {e}"),
         }
@@ -498,13 +574,13 @@ fn largest_photo(msg: &Message) -> Option<&PhotoSize> {
     msg.photo()?.iter().max_by_key(|p| p.file.size)
 }
 
-/// Downloads a photo through the Bot API. The file URL contains the bot token, so it must never be
+/// Downloads a file through the Bot API. The file URL contains the bot token, so it must never be
 /// handed to the LLM; the bytes are embedded instead.
-async fn download(app: &App, photo: &PhotoSize) -> Result<Vec<u8>, String> {
-    let file = app.bot.get_file(photo.file.id.clone()).await.map_err(|e| e.to_string())?;
-    let mut bytes = Vec::with_capacity(file.size as usize);
+async fn download(app: &App, file: &FileMeta) -> Result<Vec<u8>, String> {
+    let meta = app.bot.get_file(file.id.clone()).await.map_err(|e| e.to_string())?;
+    let mut bytes = Vec::with_capacity(meta.size as usize);
     app.bot
-        .download_file(&file.path, &mut bytes)
+        .download_file(&meta.path, &mut bytes)
         .await
         .map_err(|e| e.to_string())?;
     Ok(bytes)

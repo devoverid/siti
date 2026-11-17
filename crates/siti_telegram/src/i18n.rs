@@ -61,7 +61,7 @@ macro_rules! help_id {
             "Perintah:\n",
             "/ask <pertanyaan> — tanya apa saja\n",
             "/image <deskripsi> — buat gambar\n",
-            "/add_text atas | bawah — buat meme dari foto (kirim sebagai caption foto atau balas sebuah foto)\n",
+            "/add_text atas | bawah — buat meme dari foto atau GIF (kirim sebagai caption atau balas foto/GIF)\n",
             "/memory — lihat atau hapus hal yang saya ingat tentangmu\n",
             "/summary [jam] — ringkas obrolan (default 24 jam)\n",
             "/briefing HH:MM | off — briefing harian\n",
@@ -87,7 +87,7 @@ macro_rules! help_en {
             "Commands:\n",
             "/ask <question> — ask anything\n",
             "/image <description> — generate an image\n",
-            "/add_text top | bottom — make a meme from a photo (send as a photo caption or reply to a photo)\n",
+            "/add_text top | bottom — make a meme from a photo or GIF (send as a caption or reply to a photo/GIF)\n",
             "/memory — see or delete what I remember about you\n",
             "/summary [hours] — summarize the chat (default 24 hours)\n",
             "/briefing HH:MM | off — daily briefing\n",
@@ -128,8 +128,8 @@ pub fn usage_image(lang: Lang) -> &'static str {
 
 pub fn usage_add_text(lang: Lang) -> &'static str {
     match lang {
-        Lang::Id => "Cara pakai: /add_text teks atas | teks bawah\nKirim sebagai caption foto atau balas sebuah foto. Tanpa \"|\", teks ditulis di atas.",
-        Lang::En => "Usage: /add_text top text | bottom text\nSend it as a photo caption or reply to a photo. Without \"|\", the text goes on top.",
+        Lang::Id => "Cara pakai: /add_text teks atas | teks bawah\nKirim sebagai caption foto/GIF atau balas sebuah foto/GIF. Tanpa \"|\", teks ditulis di atas.",
+        Lang::En => "Usage: /add_text top text | bottom text\nSend it as a photo/GIF caption or reply to a photo/GIF. Without \"|\", the text goes on top.",
     }
 }
 
@@ -137,6 +137,20 @@ pub fn add_text_too_long(lang: Lang, max: usize) -> String {
     match lang {
         Lang::Id => format!("Teksnya terlalu panjang (maks. {max} karakter per bagian)."),
         Lang::En => format!("The text is too long (max {max} characters per part)."),
+    }
+}
+
+pub fn add_text_animation_too_big(lang: Lang, max_mb: u32) -> String {
+    match lang {
+        Lang::Id => format!("GIF-nya terlalu besar (maks. {max_mb} MB)."),
+        Lang::En => format!("The GIF is too big (max {max_mb} MB)."),
+    }
+}
+
+pub fn add_text_animation_unsupported(lang: Lang) -> &'static str {
+    match lang {
+        Lang::Id => "GIF ini tidak bisa diproses (maks. 600 frame dan 1280 px per sisi).",
+        Lang::En => "This GIF can't be processed (max 600 frames and 1280 px per side).",
     }
 }
 

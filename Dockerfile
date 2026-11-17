@@ -1,5 +1,6 @@
 # Chef stage - prepares the recipe for dependency caching
 FROM rust:1.92-bookworm as chef
+RUN apt-get update && apt-get install -y nasm && rm -rf /var/lib/apt/lists/*
 RUN cargo install cargo-chef
 WORKDIR /app
 

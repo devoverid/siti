@@ -4,7 +4,7 @@
 use std::{io::Cursor, sync::LazyLock};
 
 use ab_glyph::{point, Font, FontRef, GlyphId, PxScale, ScaleFont};
-use image::{codecs::jpeg::JpegEncoder, RgbImage};
+use image::codecs::jpeg::JpegEncoder;
 
 use crate::error::SitiError;
 
@@ -25,9 +25,8 @@ const MIN_FONT_PX: f32 = 12.0;
 /// Outline directions; 16 samples on the circle give a smooth stroke at meme stroke widths.
 const STROKE_SAMPLES: usize = 16;
 
-/// Draws `top` and `bottom` (either may be empty) onto `image` and returns the result as JPEG.
-/// CPU-bound: call it from a blocking context, or use [`add_text_async`].
-pub fn add_text(image: &[u8], top: &str, bottom: &str) -> Result<Vec<u8>, SitiError> {
+/// Length-checks and normalizes both captions; errors when nothing drawable remains.
+pub(crate) fn validate(top: &str, bottom: &str) -> Result<(String, String), SitiError> {
     if top.chars().count() > MAX_TEXT_CHARS || bottom.chars().count() > MAX_TEXT_CHARS {
         return Err(SitiError::Generate(format!("caption is longer than {MAX_TEXT_CHARS} characters")));
     }
@@ -36,21 +35,49 @@ pub fn add_text(image: &[u8], top: &str, bottom: &str) -> Result<Vec<u8>, SitiEr
     if top.is_empty() && bottom.is_empty() {
         return Err(SitiError::Generate("caption text is empty".into()));
     }
+    Ok((top, bottom))
+}
+
+/// Caption overlay laid out once for a `w`×`h` frame, applied to any number of frames.
+pub(crate) struct Captions {
+    canvas: Canvas,
+}
+
+impl Captions {
+    pub(crate) fn new(top: &str, bottom: &str, w: u32, h: u32) -> Result<Self, SitiError> {
+        let (top, bottom) = validate(top, bottom)?;
+        Ok(Self::layout(&top, &bottom, w, h))
+    }
+
+    fn layout(top: &str, bottom: &str, w: u32, h: u32) -> Self {
+        let margin = (h as f32 * MARGIN_RATIO).round();
+        let mut canvas = Canvas::new(w, h);
+        if !top.is_empty() {
+            let block = Block::fit(top, w as f32, h as f32);
+            canvas.draw(&block, margin);
+        }
+        if !bottom.is_empty() {
+            let block = Block::fit(bottom, w as f32, h as f32);
+            canvas.draw(&block, h as f32 - margin - block.height());
+        }
+        Self { canvas }
+    }
+
+    /// `rgb` is tightly packed RGB8, length w*h*3.
+    pub(crate) fn apply(&self, rgb: &mut [u8]) {
+        self.canvas.composite(rgb);
+    }
+}
+
+/// Draws `top` and `bottom` (either may be empty) onto `image` and returns the result as JPEG.
+/// CPU-bound: call it from a blocking context, or use [`add_text_async`].
+pub fn add_text(image: &[u8], top: &str, bottom: &str) -> Result<Vec<u8>, SitiError> {
+    let (top, bottom) = validate(top, bottom)?;
     let mut img = image::load_from_memory(image)
         .map_err(|e| SitiError::Generate(format!("cannot read the image: {e}")))?
         .into_rgb8();
     let (w, h) = img.dimensions();
-    let margin = (h as f32 * MARGIN_RATIO).round();
-    let mut canvas = Canvas::new(w, h);
-    if !top.is_empty() {
-        let block = Block::fit(&top, w as f32, h as f32);
-        canvas.draw(&block, margin);
-    }
-    if !bottom.is_empty() {
-        let block = Block::fit(&bottom, w as f32, h as f32);
-        canvas.draw(&block, h as f32 - margin - block.height());
-    }
-    canvas.composite(&mut img);
+    Captions::layout(&top, &bottom, w, h).apply(&mut img);
 
     let mut out = Cursor::new(Vec::new());
     img.write_with_encoder(JpegEncoder::new_with_quality(&mut out, JPEG_QUALITY))
@@ -223,12 +250,12 @@ impl Canvas {
         });
     }
 
-    fn composite(&self, img: &mut RgbImage) {
-        for ((pixel, &stroke), &fill) in img.pixels_mut().zip(&self.stroke).zip(&self.fill) {
+    fn composite(&self, rgb: &mut [u8]) {
+        for ((pixel, &stroke), &fill) in rgb.chunks_exact_mut(3).zip(&self.stroke).zip(&self.fill) {
             if stroke == 0.0 {
                 continue;
             }
-            for channel in &mut pixel.0 {
+            for channel in pixel {
                 let outlined = *channel as f32 * (1.0 - stroke.min(1.0));
                 *channel = (outlined + (255.0 - outlined) * fill.min(1.0)).round() as u8;
             }
@@ -239,6 +266,7 @@ impl Canvas {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use image::RgbImage;
 
     fn test_image(w: u32, h: u32) -> Vec<u8> {
         let img = RgbImage::from_pixel(w, h, image::Rgb([40, 120, 200]));
