@@ -72,6 +72,25 @@ docker compose -f docker-compose.prod.yml down
 
 To upgrade, change the `image` tag in `docker-compose.prod.yml`, then run `docker compose -f docker-compose.prod.yml pull && docker compose -f docker-compose.prod.yml up -d`.
 
+### Auto-deploy new releases
+
+`docker-compose.deploy.yml` layers on top of the prod file: the bot follows `:latest`, and [Watchtower](https://github.com/nicholas-fedor/watchtower) checks GHCR every 5 minutes and recreates only the bot when a new release is published. Postgres and other containers on the host are left alone.
+
+1. Log the host in to GHCR with a classic token that has only the `read:packages` scope (Watchtower reads `~/.docker/config.json`):
+```sh
+echo <TOKEN> | docker login ghcr.io -u <github-username> --password-stdin
+```
+2. Start the stack with both files
+```sh
+docker compose -f docker-compose.prod.yml -f docker-compose.deploy.yml up -d
+```
+3. Check update runs
+```sh
+docker compose -f docker-compose.prod.yml -f docker-compose.deploy.yml logs -f watchtower
+```
+
+Pushing a `v*.*.*` tag now ends with the bot running the new version a few minutes after the image build finishes.
+
 ## Docker image releases
 
 Push a `vMAJOR.MINOR.PATCH` tag to publish a multi-architecture image to GitHub Container Registry (`ghcr.io`). For example:

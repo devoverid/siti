@@ -1,0 +1,33 @@
+# Auto-deploy overlay for docker-compose.prod.yml.
+# Tracks the newest published release and lets Watchtower recreate the bot
+# whenever a new image lands in GHCR.
+#
+#   docker compose -f docker-compose.prod.yml -f docker-compose.deploy.yml up -d
+
+# Docker's default json-file driver never rotates; cap each service at ~30 MB.
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  db:
+    logging: *logging
+
+  bot:
+    image: ghcr.io/devoverid/siti:latest
+    labels:
+      com.centurylinklabs.watchtower.enable: "true"
+    logging: *logging
+
+  watchtower:
+    # containrrr/watchtower is archived and fails on Docker Engine 29+; this is the maintained fork.
+    image: nickfedor/watchtower:latest
+    command: --label-enable --interval 300 --cleanup
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      # GHCR credentials from the host's `docker login ghcr.io`.
+      - ${HOME}/.docker/config.json:/config.json:ro
+    restart: unless-stopped
+    logging: *logging
